@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Escáner de entradas</title>
+<style>
+:root{--blue:#0078D4;--blue-d:#106EBE;--bg:#F3F2F1;--ink:#201F1E;--mut:#605E5C;--ok:#107C10;--ko:#D13438}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 "Segoe UI",system-ui,-apple-system,Roboto,sans-serif;padding:16px max(16px,env(safe-area-inset-right)) 24px}
+main{max-width:520px;margin:0 auto}
+.card{background:#fff;border-radius:4px;padding:20px;margin-bottom:16px;box-shadow:0 1.6px 3.6px rgba(0,0,0,.13)}
+h1{font-size:22px;font-weight:600;margin:0 0 4px}.sub{color:var(--mut);font-size:14px;margin:0 0 8px}
+label{display:block;font-weight:600;font-size:14px;margin:14px 0 4px}
+input{width:100%;font:inherit;padding:9px 10px;min-height:44px;border:1px solid #8A8886;border-radius:2px}
+input:focus{outline:none;border-color:var(--blue);box-shadow:inset 0 0 0 1px var(--blue)}
+button{font:inherit;font-weight:600;border:1px solid transparent;border-radius:2px;padding:10px 16px;min-height:44px;background:var(--blue);color:#fff;width:100%;margin-top:12px;cursor:pointer}
+button:hover{background:var(--blue-d)}button:disabled{background:#F3F2F1;color:#A19F9D}
+.b2{background:#fff;color:var(--ink);border-color:#8A8886}.b2:hover{background:#F3F2F1}
+.msg{color:var(--ko);font-weight:600;font-size:14px;min-height:20px;margin:10px 0 0}
+#reader{background:#201F1E;min-height:260px;border-radius:2px;overflow:hidden}
+.hide{display:none!important}
+.row{display:flex;gap:10px}.row>input{flex:1}.row>button{flex:0 0 100px;margin:0}
+#res{position:fixed;inset:0;z-index:9;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px;color:#fff;cursor:pointer}
+#res.ok{background:#107C10}#res.ko{background:#D13438}#res h1{font-size:38px;font-weight:700}#res p{font-size:19px;margin:0 0 6px}.big{font-size:90px;line-height:1}
+</style>
+</head>
+<body>
+<main>
+  <div class="card" id="vLogin">
+    <h1>Escáner de entradas</h1><p class="sub">Acceso del personal de puerta.</p>
+    <div id="apiBox"><label for="api">Dirección de la aplicación (termina en /exec)</label><input id="api" inputmode="url" autocapitalize="none" autocorrect="off"></div>
+    <label for="u">Usuario</label><input id="u" autocapitalize="none" autocorrect="off" autocomplete="username">
+    <label for="p">Contraseña</label><input id="p" type="password" autocomplete="current-password">
+    <p class="msg" id="le"></p><button id="lb">Entrar</button>
+  </div>
+
+  <div class="card hide" id="vScan">
+    <h1 id="quien"></h1><p class="sub" id="puerta"></p>
+    <div id="reader"></div><div id="rtmp" class="hide"></div>
+    <p class="msg" id="cm"></p>
+    <button id="cam">Activar cámara</button>
+    <input type="file" id="fotoIn" accept="image/*" capture="environment" class="hide">
+    <button class="b2" id="foto">Escanear con foto</button>
+    <p class="sub" style="margin-top:16px">O escribe el código de 6 dígitos:</p>
+    <div class="row"><input id="man" inputmode="numeric" placeholder="000000"><button class="b2" id="manb">Validar</button></div>
+    <button class="b2" id="out" style="margin-top:20px">Cerrar sesión</button>
+  </div>
+</main>
+<div id="res" class="hide"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script>
+const $ = s => document.querySelector(s);
+const el = (t, c, x) => { const e = document.createElement(t); if (c) e.className = c; if (x != null) e.textContent = x; return e; };
+let API = localStorage.getItem('api') || '', S = null, scanner = null, busy = false, ULTIMO = '';
+try{ S = JSON.parse(sessionStorage.getItem('s') || 'null'); }catch(e){}
+if (API) $('#apiBox').classList.add('hide');
+
+async function api(accion, datos){
+  const r = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(Object.assign({ accion }, datos)) });
+  const j = await r.json();
+  if (!j.ok) throw new Error(j.error || 'Error');
+  return j.data;
+}
+function vista(){ $('#vLogin').classList.toggle('hide', !!S); $('#vScan').classList.toggle('hide', !S);
+  if (S){ $('#quien').textContent = S.usuario; $('#puerta').textContent = 'Validando entradas en: ' + (S.puerta || 'Administración'); } }
+vista();
+
+$('#lb').onclick = async () => {
+  $('#le').textContent = '';
+  const a = $('#api').value.trim(); if (a) API = a;
+  if (!/^https:\/\/script\.google\.com\/.+\/exec/.test(API)){ $('#apiBox').classList.remove('hide'); return $('#le').textContent = 'Pega la dirección de la aplicación (https://script.google.com/…/exec).'; }
+  $('#lb').disabled = true;
+  try{ S = await api('login', { usuario: $('#u').value.trim(), clave: $('#p').value });
+    localStorage.setItem('api', API); sessionStorage.setItem('s', JSON.stringify(S)); $('#p').value = ''; vista(); }
+  catch(e){ $('#le').textContent = e.message === 'Failed to fetch' ? 'No se pudo conectar. Revisa la dirección y que la app esté desplegada para «Cualquier usuario».' : e.message; }
+  finally{ $('#lb').disabled = false; }
+};
+$('#out').onclick = async () => { await parar(); S = null; sessionStorage.removeItem('s'); vista(); };
+
+async function parar(){ if (scanner){ try{ await scanner.stop(); }catch(e){} try{ scanner.clear(); }catch(e){} scanner = null; } $('#cam').textContent = 'Activar cámara'; }
+$('#cam').onclick = async () => {
+  if (scanner) return parar();
+  $('#cm').textContent = '';
+  try{
+    scanner = new Html5Qrcode('reader', { formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE], verbose: false });
+    await scanner.start({ facingMode: 'environment' }, { fps: 10, qrbox: { width: 240, height: 240 } }, c => validar(c));
+    $('#cam').textContent = 'Parar cámara'; ULTIMO = 'cam';
+  }catch(e){
+    scanner = null; const n = String(e && (e.name || e.message || e));
+    $('#cm').textContent = /NotAllowed|Permission|denied/i.test(n)
+      ? 'Chrome tiene la cámara bloqueada para esta página. Toca el candado junto a la dirección > Permisos > Cámara > Permitir, y recarga. También puedes usar «Escanear con foto».'
+      : 'No se pudo abrir la cámara (' + n + '). Usa «Escanear con foto».';
+  }
+};
+$('#foto').onclick = () => $('#fotoIn').click();
+$('#fotoIn').onchange = async ev => {
+  const f = ev.target.files[0]; ev.target.value = ''; if (!f) return; ULTIMO = 'foto';
+  try{ validar(await new Html5Qrcode('rtmp').scanFile(f, false)); }
+  catch(e){ $('#cm').textContent = 'No se detectó ningún QR en la foto. Acércate, enfoca y repite.'; }
+};
+$('#manb').onclick = () => { ULTIMO = ''; const v = $('#man').value; $('#man').value = ''; validar(v); };
+
+async function validar(codigo){
+  if (busy) return; busy = true;
+  try{ if (scanner) scanner.pause(true); }catch(e){}
+  let r;
+  try{ r = await api('verificar', { token: S.token, codigo }); }
+  catch(e){ r = { ok: false, motivo: e.message }; if (/Sesión caducada/.test(e.message)){ S = null; sessionStorage.removeItem('s'); } }
+  const o = $('#res'); o.className = r.ok ? 'ok' : 'ko'; o.textContent = '';
+  o.append(el('div', 'big', r.ok ? '✓' : '✕'), el('h1', '', r.ok ? 'ACCESO PERMITIDO' : 'ACCESO DENEGADO'));
+  if (r.ok) o.append(el('p', '', r.nombre), el('p', '', r.puerta));
+  else { o.append(el('p', '', r.motivo || 'Entrada inválida')); if (r.nombre) o.append(el('p', '', r.nombre)); if (r.detalle) o.append(el('p', '', r.detalle)); }
+  const q = el('p', '', 'Toca para continuar'); q.style.cssText = 'font-size:14px;opacity:.75;margin-top:24px'; o.append(q);
+  if (navigator.vibrate) navigator.vibrate(r.ok ? 120 : [200, 80, 200]);
+}
+$('#res').onclick = () => { $('#res').className = 'hide'; busy = false; if (!S) vista(); try{ if (scanner) scanner.resume(); }catch(e){} if (S && ULTIMO === 'foto') $('#fotoIn').click(); };
+</script>
+</body>
+</html>
